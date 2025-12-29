@@ -7,7 +7,6 @@ const sessions = new Map();
 // Phases (SIMPLIFIED: No Intro Phase)
 const PHASES = {
     TURN_START: 'TURN_START',
-    // INTRO deleted, merged into TURN_START for first user
     QUESTION_WINDOW: 'QUESTION_WINDOW',
     ANSWER: 'ANSWER',
     GIFT_REVEAL: 'GIFT_REVEAL',
@@ -17,9 +16,10 @@ const PHASES = {
 const KINGS = ['MELCHOR', 'GASPAR', 'BALTASAR'];
 
 const SCRIPTS = {
-    INTRO: "¡Hola! Somos los Reyes Magos. Hemos viajado desde muy lejos siguiendo la estrella. ", // Space at end
+    // Added padding silence manually with dots
+    INTRO: "... ... ... ¡Hola! Somos los Reyes Magos. Hemos viajado desde muy lejos siguiendo la estrella. ",
     LISTENING: "Te escuchamos con atención...",
-    GIFT: "¡Mira lo que ha aparecido! Es un regalo mágico.",
+    // Gift script is now dynamic
     CLOSING: "Ha sido maravilloso visitaros. ¡Sed muy buenos! ¡Hasta el año que viene!"
 };
 
@@ -48,42 +48,48 @@ async function createSession(data) {
 
         assets: {
             listening: null,
-            gift: null,
+            gifts: [], // Dynamic array of gift audios
             closing: null,
             turns: []
         }
     };
 
-    // 2. Pre-generate Audios (MERGED INTRO STRATEGY)
+    // 2. Pre-generate Audios
     console.log(`[Session ${sessionId}] Pre-generating assets...`);
 
     // Static assets
     const pListening = audioService.generateTTS(sessionId, 'Sergio', SCRIPTS.LISTENING);
-    const pGift = audioService.generateTTS(sessionId, 'Sergio', SCRIPTS.GIFT);
     const pClosing = audioService.generateTTS(sessionId, 'Sergio', SCRIPTS.CLOSING);
 
-    // Dynamic Turns
-    const pTurns = newSession.participants.map((p, index) => {
-        const king = KINGS[index % 3];
+    // Process Participants for Turns and Personalized Gifts
+    const pTurnsAndGifts = newSession.participants.map(async (p, index) => {
         const voiceId = 'Sergio';
 
+        // A. Turn/Intro Audio
         let text = `¡${p.name}! La estrella nos habló de ti...`;
-
-        // IF FIRST PARTICIPANT: Prepend the Intro!
         if (index === 0) {
             text = SCRIPTS.INTRO + " " + text;
         }
+        const turnAudioPromise = audioService.generateTTS(sessionId, voiceId, text);
 
-        return audioService.generateTTS(sessionId, voiceId, text);
+        // B. Personalized Gift Audio
+        const giftObj = newSession.gifts.find(g => g.person === p.name) || newSession.gifts[index];
+        const giftName = giftObj ? giftObj.label : 'un regalo sorpresa';
+        const giftText = `¡Mira lo que ha aparecido! Es... ${giftName}.`;
+
+        const giftAudioPromise = audioService.generateTTS(sessionId, voiceId, giftText);
+
+        const [turnRes, giftRes] = await Promise.all([turnAudioPromise, giftAudioPromise]);
+        return { turn: turnRes, gift: giftRes };
     });
 
     try {
-        const [listRes, giftRes, closingRes, ...turnsRes] = await Promise.all([pListening, pGift, pClosing, ...pTurns]);
+        const [listRes, closingRes, ...participantResults] = await Promise.all([pListening, pClosing, ...pTurnsAndGifts]);
 
         newSession.assets.listening = listRes;
-        newSession.assets.gift = giftRes;
         newSession.assets.closing = closingRes;
-        newSession.assets.turns = turnsRes;
+        newSession.assets.turns = participantResults.map(r => r.turn);
+        newSession.assets.gifts = participantResults.map(r => r.gift);
 
     } catch (e) {
         console.error(`[Session ${sessionId}] Asset generation warning:`, e);
@@ -116,7 +122,6 @@ async function getNextState(sessionId) {
     // A. Priority Queue
     if (session.next_action_queue.length > 0) {
         if (session.current_phase === PHASES.ANSWER) {
-            // 12s hold for answer
             if (elapsed < 12000) {
                 // wait
             } else {
@@ -134,15 +139,12 @@ async function getNextState(sessionId) {
 
     // B. State Machine Flow
     switch (session.current_phase) {
-        // CASE INTRO REMOVED - DIRECTLY TO TURN_START
-
         case PHASES.TURN_START:
             const pIndex = session.current_participant_index;
             const turnAudio = (session.assets.turns && session.assets.turns[pIndex])
                 ? session.assets.turns[pIndex]
                 : { tts_audio_url: null, duration_ms: 6000 };
 
-            // Allow full duration + buffer
             if (elapsed < (turnAudio.duration_ms + 2000)) {
                 const p = session.participants[pIndex];
                 const king = KINGS[session.current_king_index % 3];
@@ -160,7 +162,6 @@ async function getNextState(sessionId) {
                     duration_ms: turnAudio.duration_ms,
                     animation_cue: 'talk_happy',
                     should_open_question_window: true,
-                    // Give simpler window instructions
                     question_window_seconds: 0
                 };
             } else {
@@ -172,7 +173,6 @@ async function getNextState(sessionId) {
 
         case PHASES.QUESTION_WINDOW:
             const listening = session.assets.listening || { tts_audio_url: null, duration_ms: 3000 };
-            // Use 5s hold for "Listening" instructions then just stay idle
             if (elapsed < (listening.duration_ms + 1000)) {
                 event = {
                     phase: PHASES.QUESTION_WINDOW,
@@ -183,13 +183,10 @@ async function getNextState(sessionId) {
                     should_open_question_window: true
                 };
             } else {
-                // Remain in QUESTION_WINDOW but maybe stop playing audio (or keep returning same event is ok, frontend handles dedupe)
                 event = {
                     phase: PHASES.QUESTION_WINDOW,
                     king: KINGS[session.current_king_index % 3],
                     subtitle_text: SCRIPTS.LISTENING,
-                    // Avoid sending audio URL again to prevent loop? 
-                    // Frontend usually blocks re-play if same URL.
                     tts_audio_url: listening.tts_audio_url,
                     animation_cue: "idle",
                     should_open_question_window: true
@@ -212,7 +209,10 @@ async function getNextState(sessionId) {
             break;
 
         case PHASES.GIFT_REVEAL:
-            const giftAudio = session.assets.gift || { tts_audio_url: null, duration_ms: 4000 };
+            const pIdx = session.current_participant_index;
+            const giftAudio = (session.assets.gifts && session.assets.gifts[pIdx])
+                ? session.assets.gifts[pIdx]
+                : { tts_audio_url: null, duration_ms: 4000 };
 
             if (elapsed < (giftAudio.duration_ms + 2000)) {
                 const gift = session.gifts.find(g => g.person === session.participants[session.current_participant_index].name);
@@ -229,7 +229,7 @@ async function getNextState(sessionId) {
                 if (session.current_participant_index >= session.participants.length) {
                     session.current_phase = PHASES.CLOSING;
                 } else {
-                    session.current_phase = PHASES.TURN_START; // Loops back to next child
+                    session.current_phase = PHASES.TURN_START;
                     session.current_king_index++;
                 }
                 session.phase_start_time = now;
