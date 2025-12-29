@@ -3,6 +3,19 @@
 @tailwind utilities;
 
 :root {
-  background-color: #020617; /* slate-950 */
+  background-color: #0f172a;
+  /* slate-900 fallback */
   color: white;
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+}
+
+body {
+  background: radial-gradient(circle at 50% 0%, #1e293b 0%, #020617 100%);
+  min-height: 100vh;
+}
+
+::selection {
+  background-color: #fbbf24;
+  /* amber-400 */
+  color: #000;
 }

@@ -1,13 +1,15 @@
 import { useState } from 'react';
 import { createSession } from '../services/api';
 import { useNavigate } from 'react-router-dom';
+import { motion, AnimatePresence } from 'framer-motion';
+import { Sparkles, Gift, Users, Star, Monitor, Smartphone, ArrowRight, Loader } from 'lucide-react';
 
 export default function Landing() {
     const navigate = useNavigate();
     const [loading, setLoading] = useState(false);
-    const [pack, setPack] = useState('basic');
+    const [pack, setPack] = useState('standard');
     const [participants, setParticipants] = useState([
-        { name: '', age_group: 'child', tagline: '', gift: 'Un juguete sorpresa' }
+        { name: '', age_group: 'child', tagline: '', gift: '' }
     ]);
     const [createdLinks, setCreatedLinks] = useState(null);
 
@@ -21,11 +23,16 @@ export default function Landing() {
         setParticipants(newP);
     };
 
+    const removeParticipant = (index) => {
+        if (participants.length === 1) return;
+        const newP = participants.filter((_, i) => i !== index);
+        setParticipants(newP);
+    };
+
     const handleSubmit = async (e) => {
         e.preventDefault();
         setLoading(true);
         try {
-            // Transform local state to API contract
             const apiParticipants = participants.map(p => ({
                 name: p.name,
                 age_group: p.age_group,
