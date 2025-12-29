@@ -16,8 +16,39 @@ const MOCK_TRANSCRIPTION = "¿Cuántos camellos tenéis?";
 const MOCK_AUDIO_URL = "https://actions.google.com/sounds/v1/speech/greeting_en.ogg";
 
 async function transcribe(sessionId, audioId) {
-    console.log(`\n[🔍 TEST STEP 1: STT] Recibido Audio ID: ${audioId}`);
-    return MOCK_TRANSCRIPTION;
+    console.log(`\n[STT] Transcribing Audio ID: ${audioId} with Whisper...`);
+
+    // 1. Locate the file
+    // In server/routes.js we save uploads to os.tmpdir() with filename `audio_${timestamp}.webm` (or similar)
+    // But wait, the route just passes 'audioId' which is the filename.
+
+    const filePath = path.join(os.tmpdir(), audioId);
+
+    if (!fs.existsSync(filePath)) {
+        console.error(`[STT Error] File not found at ${filePath}`);
+        return MOCK_TRANSCRIPTION; // Fallback to mock if file missing
+    }
+
+    try {
+        const transcription = await openai.audio.transcriptions.create({
+            file: fs.createReadStream(filePath),
+            model: "whisper-1",
+            language: "es", // Force Spanish for better accuracy
+        });
+
+        const text = transcription.text;
+        console.log(`[STT] Whisper Result: "${text}"`);
+
+        if (!text || text.trim().length === 0) {
+            return "No he podido escuchar bien, ¿puedes repetir?";
+        }
+
+        return text;
+
+    } catch (error) {
+        console.error("[STT Error] Whisper failed:", error);
+        return "Hubo un error al escuchar, pero la magia sigue viva.";
+    }
 }
 
 async function generateReply(data) {
