@@ -132,7 +132,8 @@ async function generateTTS(sessionId, voiceId, text) {
             fs.writeFileSync(filePath, Buffer.from(audioBuffer));
 
             const words = text.split(' ').length;
-            const durationMs = Math.max(2000, (words / 2.5) * 1000);
+            // Slower estimate: 2.2 words/sec + 1.5s buffer to prevent cut-off
+            const durationMs = Math.max(3000, (words / 2.2) * 1000 + 1500);
             const audioUrl = `${config.BASE_URL}/audio/${filename}`;
 
             console.log(`[TTS] Generated: ${audioUrl}`);
