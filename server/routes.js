@@ -81,4 +81,16 @@ router.post('/tts', async (req, res) => {
     }
 });
 
+// Test route for Polly
+router.get('/test-polly', async (req, res) => {
+    try {
+        console.log("Testing Polly...");
+        const result = await audioService.generateTTS('test_' + Date.now(), 'Sergio', 'Hola. Si escuchas esto, la magia funciona perfectamente.');
+        res.json({ success: true, url: result.tts_audio_url, detail: result });
+    } catch (error) {
+        console.error("Polly Test Failed:", error);
+        res.status(500).json({ success: false, error: error.message, stack: error.stack });
+    }
+});
+
 module.exports = router;
