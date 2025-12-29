@@ -20,9 +20,11 @@ const PHASES = {
 
 const KINGS = ['MELCHOR', 'GASPAR', 'BALTASAR'];
 
+// Added scripts for Listening and Gift
 const SCRIPTS = {
     INTRO: "¡Hola! Somos los Reyes Magos. Hemos viajado desde muy lejos siguiendo la estrella.",
-    RULES: "Antes de entregar los regalos, queremos hablar un poco con vosotros. ¿Estáis listos?",
+    LISTENING: "Te escuchamos con atención...",
+    GIFT: "¡Mira lo que ha aparecido! Es un regalo mágico.",
     CLOSING: "Ha sido maravilloso visitaros. ¡Sed muy buenos! ¡Hasta el año que viene!"
 };
 
@@ -41,7 +43,8 @@ async function createSession(data) {
 
         // State Machine Vars
         current_phase: PHASES.INTRO,
-        phase_start_time: Date.now(), // Key for timing logic
+        phase_start_time: 0, // 0 means "Not Started Yet" until TV connects
+        tv_connected_at: 0,
 
         current_king_index: 0,
         current_participant_index: 0,
@@ -51,6 +54,8 @@ async function createSession(data) {
         // Cache for pre-generated audios
         assets: {
             intro: null,
+            listening: null, // NEW
+            gift: null,      // NEW
             closing: null,
             turns: []
         }
@@ -59,8 +64,12 @@ async function createSession(data) {
     // 2. Pre-generate Audios
     console.log(`[Session ${sessionId}] Pre-generating assets...`);
 
+    // Using 'Sergio' as confirmed working voice
     const pIntro = audioService.generateTTS(sessionId, 'Sergio', SCRIPTS.INTRO);
+    const pListening = audioService.generateTTS(sessionId, 'Sergio', SCRIPTS.LISTENING);
+    const pGift = audioService.generateTTS(sessionId, 'Sergio', SCRIPTS.GIFT);
     const pClosing = audioService.generateTTS(sessionId, 'Sergio', SCRIPTS.CLOSING);
+
     const pTurns = newSession.participants.map((p, index) => {
         const king = KINGS[index % 3];
         const voiceId = 'Sergio';
@@ -69,17 +78,13 @@ async function createSession(data) {
     });
 
     try {
-        const [introRes, closingRes, ...turnsRes] = await Promise.all([pIntro, pClosing, ...pTurns]);
+        const [introRes, listRes, giftRes, closingRes, ...turnsRes] = await Promise.all([pIntro, pListening, pGift, pClosing, ...pTurns]);
+
         newSession.assets.intro = introRes;
+        newSession.assets.listening = listRes;
+        newSession.assets.gift = giftRes;
         newSession.assets.closing = closingRes;
         newSession.assets.turns = turnsRes;
-
-        // Reset start time to NOW so intro starts fresh when user actually gets the links?
-        // Actually, createSession is called by frontend, wait a bit, then opens TV.
-        // We might want to "start" the timer only when TV first polls?
-        // But for MVP simplicity, we give a generous initial buffer or trust the user opens it fast.
-        // Better Idea: Phase 'INTRO' logic waits until explicitly requested? No, polling is auto.
-        // Let's rely on the generous buffer.
 
     } catch (e) {
         console.error(`[Session ${sessionId}] Asset generation warning:`, e);
@@ -100,23 +105,22 @@ async function getNextState(sessionId) {
     const session = sessions.get(sessionId);
     if (!session) throw new Error('Session not found');
 
-    let event = {};
+    // INITIALIZATION LOGIC (Auto-Start on TV Connect)
     const now = Date.now();
-
-    // Very naive "first poll starts the timer" check for Intro cleanliness
     if (!session.tv_connected_at) {
         session.tv_connected_at = now;
-        session.phase_start_time = now; // Reset timer on first contact
+        session.phase_start_time = now;
     }
 
+    let event = {};
     const elapsed = now - session.phase_start_time;
 
     // A. Priority Queue (Dynamic Responses / Answers)
     if (session.next_action_queue.length > 0) {
         if (session.current_phase === PHASES.ANSWER) {
-            // We are already playing an answer. Allow 15s before moving on.
-            if (elapsed < 15000) {
-                // Keep waiting.
+            // Wait sufficient time for answer playback (e.g., 12s buffer logic handled in frontend usually, but here we force hold)
+            if (elapsed < 12000) {
+                // Keep waiting
             } else {
                 session.current_phase = PHASES.GIFT_REVEAL;
                 session.phase_start_time = now;
@@ -134,13 +138,10 @@ async function getNextState(sessionId) {
     // B. State Machine Flow
     switch (session.current_phase) {
         case PHASES.INTRO:
-            const intro = session.assets.intro || { tts_audio_url: null, duration_ms: 5000 };
+            const intro = session.assets.intro || { tts_audio_url: null, duration_ms: 15000 };
+            const safeIntroDuration = Math.max(intro.duration_ms || 0, 15000); // 15s forced minimum
 
-            // Force 15s duration for Intro ensuring full playback
-            const safeIntroDuration = Math.max(intro.duration_ms, 15000);
-
-            // Hold phase logic: duration + 2s buffer
-            if (elapsed < (safeIntroDuration + 2000)) {
+            if (elapsed < (safeIntroDuration + 1000)) {
                 event = {
                     phase: PHASES.INTRO,
                     king: KINGS[0],
@@ -186,20 +187,20 @@ async function getNextState(sessionId) {
             break;
 
         case PHASES.QUESTION_WINDOW:
-            // Infinite wait until queued action
+            const listening = session.assets.listening || { tts_audio_url: null, duration_ms: 3000 };
             event = {
                 phase: PHASES.QUESTION_WINDOW,
                 king: KINGS[session.current_king_index % 3],
-                subtitle_text: "Te escuchamos...",
+                subtitle_text: SCRIPTS.LISTENING,
+                tts_audio_url: listening.tts_audio_url, // Now plays audio!
                 animation_cue: "idle",
                 should_open_question_window: true
             };
             break;
 
         case PHASES.ANSWER:
-            // If we are here without queue items, it implies we finished answering or got lost.
-            // Move to GIFT_REVEAL after safer timeout check (fallback)
-            if (elapsed > 10000) {
+            // Fallback timeout
+            if (elapsed > 12000) {
                 session.current_phase = PHASES.GIFT_REVEAL;
                 session.phase_start_time = now;
                 return getNextState(sessionId);
@@ -213,14 +214,15 @@ async function getNextState(sessionId) {
             break;
 
         case PHASES.GIFT_REVEAL:
-            // 5 seconds fixed display
-            if (elapsed < 5000) {
+            const giftAudio = session.assets.gift || { tts_audio_url: null, duration_ms: 4000 };
+
+            if (elapsed < (giftAudio.duration_ms + 2000)) {
                 const gift = session.gifts.find(g => g.person === session.participants[session.current_participant_index].name);
                 event = {
                     phase: PHASES.GIFT_REVEAL,
                     king: KINGS[session.current_king_index % 3],
                     subtitle_text: `Mira... ${gift ? gift.label : 'un regalo'} para ti.`,
-                    tts_audio_url: `${config.BASE_URL}/audio/gift.mp3`,
+                    tts_audio_url: giftAudio.tts_audio_url, // Now plays audio!
                     animation_cue: 'point',
                     should_open_question_window: false
                 };
@@ -239,7 +241,6 @@ async function getNextState(sessionId) {
 
         case PHASES.CLOSING:
             const closing = session.assets.closing || { tts_audio_url: null, duration_ms: 10000 };
-            // Use 999999 wait to keep holding closing state
             event = {
                 phase: PHASES.CLOSING,
                 king: KINGS[1],
