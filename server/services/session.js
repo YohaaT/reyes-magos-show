@@ -69,73 +69,65 @@ async function createSession(data) {
     };
 }
 
+const audioService = require('./audio'); // Needed for dynamic TTS in session flow
+
 async function getNextState(sessionId) {
     const session = sessions.get(sessionId);
     if (!session) throw new Error('Session not found');
-
-    // Simple State Machine Logic
-    // This is called when TV finishes previous action and asks "What's next?"
 
     let event = {};
 
     // If we have a queued action (e.g. from an Answer), return it
     if (session.next_action_queue.length > 0) {
         event = session.next_action_queue.shift();
-        // Update phase if the event dictates it
-        // (In a full implementation, events would carry state transition info)
         return event;
     }
 
     // Otherwise, calculate next step based on current phase
     switch (session.current_phase) {
         case PHASES.INTRO:
+            // Generate real TTS for Intro
+            const introResult = await audioService.generateTTS(sessionId, 'Enrique', SCRIPTS.INTRO);
+
             event = {
                 phase: PHASES.INTRO,
                 king: KINGS[0],
                 subtitle_text: SCRIPTS.INTRO,
-                tts_audio_url: `${config.BASE_URL}/audio/intro_demo.mp3`, // Placeholder
+                tts_audio_url: introResult.tts_audio_url,
+                duration_ms: introResult.duration_ms,
                 animation_cue: 'talk_happy',
                 should_open_question_window: false,
                 question_window_seconds: 0
             };
-            // Advance Phase for next call
-            session.current_phase = PHASES.RULES;
-            break;
-
-        case PHASES.RULES:
-            event = {
-                phase: PHASES.RULES,
-                king: KINGS[1],
-                subtitle_text: SCRIPTS.RULES,
-                tts_audio_url: `${config.BASE_URL}/audio/rules_demo.mp3`,
-                animation_cue: 'talk_solemn',
-                should_open_question_window: false
-            };
+            // Advance directly to Turn Start (Skipping Rules for faster MVP flow)
             session.current_phase = PHASES.TURN_START;
             break;
 
         case PHASES.TURN_START:
             const p = session.participants[session.current_participant_index];
             const king = KINGS[session.current_king_index % 3];
+
+            // Dynamic text
+            const welcomeText = `¡${p.name}! La estrella nos habló de ti...`;
+            const voiceId = king === 'GASPAR' ? 'Enrique' : (king === 'MELCHOR' ? 'Miguel' : 'Sergio');
+
+            const turnAudio = await audioService.generateTTS(sessionId, voiceId, welcomeText);
+
             event = {
                 phase: PHASES.TURN_START,
                 king: king,
-                subtitle_text: `¡${p.name}! La estrella nos habló de ti...`,
-                tts_audio_url: `${config.BASE_URL}/audio/turn_start.mp3`, // Dynamic generation in real app
+                subtitle_text: welcomeText,
+                tts_audio_url: turnAudio.tts_audio_url,
+                duration_ms: turnAudio.duration_ms,
                 animation_cue: 'talk_happy',
                 should_open_question_window: true,
                 question_window_seconds: session.pack === 'basic' ? 12 : 15
             };
-            // Next expectation: User asks question -> /reply endpoint handles it and sets next phase/queue
+
             session.current_phase = PHASES.QUESTION_WINDOW;
             break;
 
         case PHASES.QUESTION_WINDOW:
-            // Logic: Waiting for user input. 
-            // If this is called, it might mean timeout or polling.
-            // For MVP, if TV calls this, maybe we just keep waiting or hint?
-            // Or, if /reply was called, `session.next_action_queue` would have the ANSWER.
-            // If empty, return status loop or "Waiting"
             event = {
                 phase: PHASES.QUESTION_WINDOW,
                 king: KINGS[session.current_king_index % 3],
@@ -146,22 +138,12 @@ async function getNextState(sessionId) {
             break;
 
         case PHASES.ANSWER:
-            // Handled via queue usually, but if we fall through:
-            session.current_phase = PHASES.GIFT_REVEAL; // Auto advance
-            return getNextState(sessionId); // Recursion to get gift
+            session.current_phase = PHASES.GIFT_REVEAL;
+            return getNextState(sessionId); // Recursion
 
         case PHASES.GIFT_REVEAL:
-            const gift = session.gifts.find(g => g.person === session.participants[session.current_participant_index].name);
-            event = {
-                phase: PHASES.GIFT_REVEAL,
-                king: KINGS[session.current_king_index % 3],
-                subtitle_text: `Mira... ${gift ? gift.label : 'un regalo'} para ti.`,
-                tts_audio_url: `${config.BASE_URL}/audio/gift.mp3`,
-                animation_cue: 'point',
-                should_open_question_window: false
-            };
-
-            // Advance participant or end
+            // MVP: Skip gift reveal audio generation to save latency, or just generic
+            // For now, let's just move to closing or next person
             session.current_participant_index++;
             if (session.current_participant_index >= session.participants.length) {
                 session.current_phase = PHASES.CLOSING;
@@ -169,18 +151,20 @@ async function getNextState(sessionId) {
                 session.current_phase = PHASES.TURN_START;
                 session.current_king_index++;
             }
-            break;
+            return getNextState(sessionId);
 
         case PHASES.CLOSING:
+            const closingAudio = await audioService.generateTTS(sessionId, 'Miguel', SCRIPTS.CLOSING);
+
             event = {
                 phase: PHASES.CLOSING,
                 king: KINGS[1],
                 subtitle_text: SCRIPTS.CLOSING,
-                tts_audio_url: `${config.BASE_URL}/audio/closing.mp3`,
+                tts_audio_url: closingAudio.tts_audio_url,
+                duration_ms: closingAudio.duration_ms,
                 animation_cue: 'wave',
                 should_open_question_window: false
             };
-            // End state
             break;
     }
 
