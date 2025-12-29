@@ -89,20 +89,20 @@ export default function TV({ sessionId }) {
                         initial={{ opacity: 0, y: 20 }}
                         animate={{ opacity: 1, y: 0 }}
                         exit={{ opacity: 0, y: -20 }}
-                        className="absolute bottom-20 z-20 w-full max-w-5xl text-center px-4"
+                        className="absolute bottom-10 z-20 w-full max-w-6xl text-center px-8"
                     >
-                        <p className="text-3xl md:text-5xl font-bold text-white drop-shadow-[0_2px_10px_rgba(0,0,0,0.8)] leading-tight font-serif">
+                        <p className="text-2xl md:text-4xl font-bold text-white drop-shadow-[0_2px_15px_rgba(0,0,0,0.9)] leading-normal font-serif bg-black/40 p-4 rounded-xl backdrop-blur-sm border border-white/10">
                             {subtitle}
                         </p>
                     </motion.div>
                 )}
             </AnimatePresence>
 
-            {/* Status Debug for MVP */}
-            <div className="absolute top-4 left-4 text-xs text-white/50 bg-black/50 p-2 rounded max-w-lg truncate">
+            {/* Status Debug for MVP (Small & Bottom Left) */}
+            <div className="absolute bottom-4 left-4 text-[10px] text-white/30 bg-black/80 p-2 rounded max-w-lg truncate hover:opacity-100 transition-opacity opacity-50">
                 Phase: {currentEvent?.phase} | King: {king}
                 <br />
-                Audio URL: {currentEvent?.tts_audio_url || 'None'}
+                Audio: {currentEvent?.tts_audio_url ? 'YES' : 'NONE'}
                 <br />
                 <button
                     onClick={() => {
@@ -110,9 +110,9 @@ export default function TV({ sessionId }) {
                             audioRef.current.play().then(() => console.log("Manual play success")).catch(e => console.error("Manual play error", e));
                         }
                     }}
-                    className="mt-2 bg-red-600 px-2 py-1 rounded text-white hover:bg-red-500 pointer-events-auto"
+                    className="mt-1 bg-white/20 px-1 rounded text-white hover:bg-white/40 pointer-events-auto"
                 >
-                    FORCE PLAY SOUND
+                    PLAY
                 </button>
             </div>
         </div>
