@@ -4,25 +4,20 @@ const config = require('../config');
 // In-memory session store
 const sessions = new Map();
 
-// Phases
+// Phases (SIMPLIFIED: No Intro Phase)
 const PHASES = {
-    INTRO: 'INTRO',
-    RULES: 'RULES',
     TURN_START: 'TURN_START',
-    BUILDUP: 'BUILDUP',
-    CHALLENGE_OR_HINT: 'CHALLENGE_OR_HINT',
+    // INTRO deleted, merged into TURN_START for first user
     QUESTION_WINDOW: 'QUESTION_WINDOW',
     ANSWER: 'ANSWER',
     GIFT_REVEAL: 'GIFT_REVEAL',
-    TURN_END: 'TURN_END',
     CLOSING: 'CLOSING'
 };
 
 const KINGS = ['MELCHOR', 'GASPAR', 'BALTASAR'];
 
-// Added scripts for Listening and Gift
 const SCRIPTS = {
-    INTRO: "¡Hola! Somos los Reyes Magos. Hemos viajado desde muy lejos siguiendo la estrella.",
+    INTRO: "¡Hola! Somos los Reyes Magos. Hemos viajado desde muy lejos siguiendo la estrella. ", // Space at end
     LISTENING: "Te escuchamos con atención...",
     GIFT: "¡Mira lo que ha aparecido! Es un regalo mágico.",
     CLOSING: "Ha sido maravilloso visitaros. ¡Sed muy buenos! ¡Hasta el año que viene!"
@@ -30,9 +25,9 @@ const SCRIPTS = {
 
 async function createSession(data) {
     const sessionId = uuidv4();
-    const audioService = require('./audio'); // Lazy load
+    const audioService = require('./audio');
 
-    // 1. Prepare Session Data Structure
+    // 1. Prepare Session Data
     const newSession = {
         id: sessionId,
         created_at: Date.now(),
@@ -41,9 +36,9 @@ async function createSession(data) {
         gifts: data.gifts || [],
         settings: data.settings || {},
 
-        // State Machine Vars
-        current_phase: PHASES.INTRO,
-        phase_start_time: 0, // 0 means "Not Started Yet" until TV connects
+        // Initial Phase is TURN_START directly
+        current_phase: PHASES.TURN_START,
+        phase_start_time: 0,
         tv_connected_at: 0,
 
         current_king_index: 0,
@@ -51,36 +46,40 @@ async function createSession(data) {
         questions_used_for_person: 0,
         next_action_queue: [],
 
-        // Cache for pre-generated audios
         assets: {
-            intro: null,
-            listening: null, // NEW
-            gift: null,      // NEW
+            listening: null,
+            gift: null,
             closing: null,
             turns: []
         }
     };
 
-    // 2. Pre-generate Audios
+    // 2. Pre-generate Audios (MERGED INTRO STRATEGY)
     console.log(`[Session ${sessionId}] Pre-generating assets...`);
 
-    // Using 'Sergio' as confirmed working voice
-    const pIntro = audioService.generateTTS(sessionId, 'Sergio', SCRIPTS.INTRO);
+    // Static assets
     const pListening = audioService.generateTTS(sessionId, 'Sergio', SCRIPTS.LISTENING);
     const pGift = audioService.generateTTS(sessionId, 'Sergio', SCRIPTS.GIFT);
     const pClosing = audioService.generateTTS(sessionId, 'Sergio', SCRIPTS.CLOSING);
 
+    // Dynamic Turns
     const pTurns = newSession.participants.map((p, index) => {
         const king = KINGS[index % 3];
         const voiceId = 'Sergio';
-        const text = `¡${p.name}! La estrella nos habló de ti...`;
+
+        let text = `¡${p.name}! La estrella nos habló de ti...`;
+
+        // IF FIRST PARTICIPANT: Prepend the Intro!
+        if (index === 0) {
+            text = SCRIPTS.INTRO + " " + text;
+        }
+
         return audioService.generateTTS(sessionId, voiceId, text);
     });
 
     try {
-        const [introRes, listRes, giftRes, closingRes, ...turnsRes] = await Promise.all([pIntro, pListening, pGift, pClosing, ...pTurns]);
+        const [listRes, giftRes, closingRes, ...turnsRes] = await Promise.all([pListening, pGift, pClosing, ...pTurns]);
 
-        newSession.assets.intro = introRes;
         newSession.assets.listening = listRes;
         newSession.assets.gift = giftRes;
         newSession.assets.closing = closingRes;
@@ -105,7 +104,6 @@ async function getNextState(sessionId) {
     const session = sessions.get(sessionId);
     if (!session) throw new Error('Session not found');
 
-    // INITIALIZATION LOGIC (Auto-Start on TV Connect)
     const now = Date.now();
     if (!session.tv_connected_at) {
         session.tv_connected_at = now;
@@ -115,21 +113,20 @@ async function getNextState(sessionId) {
     let event = {};
     const elapsed = now - session.phase_start_time;
 
-    // A. Priority Queue (Dynamic Responses / Answers)
+    // A. Priority Queue
     if (session.next_action_queue.length > 0) {
         if (session.current_phase === PHASES.ANSWER) {
-            // Wait sufficient time for answer playback (e.g., 12s buffer logic handled in frontend usually, but here we force hold)
+            // 12s hold for answer
             if (elapsed < 12000) {
-                // Keep waiting
+                // wait
             } else {
                 session.current_phase = PHASES.GIFT_REVEAL;
                 session.phase_start_time = now;
                 return getNextState(sessionId);
             }
         } else {
-            // Pop new event
             event = session.next_action_queue.shift();
-            session.current_phase = event.phase; // Should be ANSWER
+            session.current_phase = event.phase;
             session.phase_start_time = now;
             return event;
         }
@@ -137,37 +134,23 @@ async function getNextState(sessionId) {
 
     // B. State Machine Flow
     switch (session.current_phase) {
-        case PHASES.INTRO:
-            const intro = session.assets.intro || { tts_audio_url: null, duration_ms: 15000 };
-            const safeIntroDuration = Math.max(intro.duration_ms || 0, 15000); // 15s forced minimum
-
-            if (elapsed < (safeIntroDuration + 1000)) {
-                event = {
-                    phase: PHASES.INTRO,
-                    king: KINGS[0],
-                    subtitle_text: SCRIPTS.INTRO,
-                    tts_audio_url: intro.tts_audio_url,
-                    duration_ms: safeIntroDuration,
-                    animation_cue: 'talk_happy',
-                    should_open_question_window: false
-                };
-            } else {
-                session.current_phase = PHASES.TURN_START;
-                session.phase_start_time = now;
-                return getNextState(sessionId);
-            }
-            break;
+        // CASE INTRO REMOVED - DIRECTLY TO TURN_START
 
         case PHASES.TURN_START:
             const pIndex = session.current_participant_index;
             const turnAudio = (session.assets.turns && session.assets.turns[pIndex])
                 ? session.assets.turns[pIndex]
-                : { tts_audio_url: null, duration_ms: 4000 };
+                : { tts_audio_url: null, duration_ms: 6000 };
 
+            // Allow full duration + buffer
             if (elapsed < (turnAudio.duration_ms + 2000)) {
                 const p = session.participants[pIndex];
                 const king = KINGS[session.current_king_index % 3];
-                const welcomeText = `¡${p.name}! La estrella nos habló de ti...`;
+
+                let welcomeText = `¡${p.name}! La estrella nos habló de ti...`;
+                if (pIndex === 0) {
+                    welcomeText = SCRIPTS.INTRO + " " + welcomeText;
+                }
 
                 event = {
                     phase: PHASES.TURN_START,
@@ -177,7 +160,8 @@ async function getNextState(sessionId) {
                     duration_ms: turnAudio.duration_ms,
                     animation_cue: 'talk_happy',
                     should_open_question_window: true,
-                    question_window_seconds: session.pack === 'basic' ? 12 : 15
+                    // Give simpler window instructions
+                    question_window_seconds: 0
                 };
             } else {
                 session.current_phase = PHASES.QUESTION_WINDOW;
@@ -188,18 +172,32 @@ async function getNextState(sessionId) {
 
         case PHASES.QUESTION_WINDOW:
             const listening = session.assets.listening || { tts_audio_url: null, duration_ms: 3000 };
-            event = {
-                phase: PHASES.QUESTION_WINDOW,
-                king: KINGS[session.current_king_index % 3],
-                subtitle_text: SCRIPTS.LISTENING,
-                tts_audio_url: listening.tts_audio_url, // Now plays audio!
-                animation_cue: "idle",
-                should_open_question_window: true
-            };
+            // Use 5s hold for "Listening" instructions then just stay idle
+            if (elapsed < (listening.duration_ms + 1000)) {
+                event = {
+                    phase: PHASES.QUESTION_WINDOW,
+                    king: KINGS[session.current_king_index % 3],
+                    subtitle_text: SCRIPTS.LISTENING,
+                    tts_audio_url: listening.tts_audio_url,
+                    animation_cue: "idle",
+                    should_open_question_window: true
+                };
+            } else {
+                // Remain in QUESTION_WINDOW but maybe stop playing audio (or keep returning same event is ok, frontend handles dedupe)
+                event = {
+                    phase: PHASES.QUESTION_WINDOW,
+                    king: KINGS[session.current_king_index % 3],
+                    subtitle_text: SCRIPTS.LISTENING,
+                    // Avoid sending audio URL again to prevent loop? 
+                    // Frontend usually blocks re-play if same URL.
+                    tts_audio_url: listening.tts_audio_url,
+                    animation_cue: "idle",
+                    should_open_question_window: true
+                };
+            }
             break;
 
         case PHASES.ANSWER:
-            // Fallback timeout
             if (elapsed > 12000) {
                 session.current_phase = PHASES.GIFT_REVEAL;
                 session.phase_start_time = now;
@@ -222,7 +220,7 @@ async function getNextState(sessionId) {
                     phase: PHASES.GIFT_REVEAL,
                     king: KINGS[session.current_king_index % 3],
                     subtitle_text: `Mira... ${gift ? gift.label : 'un regalo'} para ti.`,
-                    tts_audio_url: giftAudio.tts_audio_url, // Now plays audio!
+                    tts_audio_url: giftAudio.tts_audio_url,
                     animation_cue: 'point',
                     should_open_question_window: false
                 };
@@ -231,7 +229,7 @@ async function getNextState(sessionId) {
                 if (session.current_participant_index >= session.participants.length) {
                     session.current_phase = PHASES.CLOSING;
                 } else {
-                    session.current_phase = PHASES.TURN_START;
+                    session.current_phase = PHASES.TURN_START; // Loops back to next child
                     session.current_king_index++;
                 }
                 session.phase_start_time = now;
