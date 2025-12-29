@@ -3,7 +3,8 @@ require('dotenv').config();
 module.exports = {
   PORT: process.env.PORT || 3000,
   // BASE_URL for API calls (backend)
-  BASE_URL: process.env.BASE_URL || 'http://localhost:3000',
+  // If running on Render, use explicit external URL or auto-discovery
+  BASE_URL: process.env.BASE_URL || (process.env.RENDER_EXTERNAL_URL ? process.env.RENDER_EXTERNAL_URL : 'http://localhost:3000'),
   // FRONTEND_URL for user links (client)
   FRONTEND_URL: process.env.FRONTEND_URL || 'http://localhost:5173',
 
