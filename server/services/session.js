@@ -136,14 +136,17 @@ async function getNextState(sessionId) {
         case PHASES.INTRO:
             const intro = session.assets.intro || { tts_audio_url: null, duration_ms: 5000 };
 
+            // Force 15s duration for Intro ensuring full playback
+            const safeIntroDuration = Math.max(intro.duration_ms, 15000);
+
             // Hold phase logic: duration + 2s buffer
-            if (elapsed < (intro.duration_ms + 2000)) {
+            if (elapsed < (safeIntroDuration + 2000)) {
                 event = {
                     phase: PHASES.INTRO,
                     king: KINGS[0],
                     subtitle_text: SCRIPTS.INTRO,
                     tts_audio_url: intro.tts_audio_url,
-                    duration_ms: intro.duration_ms,
+                    duration_ms: safeIntroDuration,
                     animation_cue: 'talk_happy',
                     should_open_question_window: false
                 };
