@@ -98,8 +98,8 @@ export default function TV({ sessionId }) {
                 )}
             </AnimatePresence>
 
-            {/* Status Debug for MVP (Small & Bottom Left) */}
-            <div className="absolute bottom-4 left-4 text-[10px] text-white/30 bg-black/80 p-2 rounded max-w-lg truncate hover:opacity-100 transition-opacity opacity-50">
+            {/* Status Debug for MVP (Small & Top Left) */}
+            <div className="absolute top-4 left-4 z-50 text-[10px] text-white/30 bg-black/80 p-2 rounded max-w-lg truncate hover:opacity-100 transition-opacity opacity-50">
                 Phase: {currentEvent?.phase} | King: {king}
                 <br />
                 Audio: {currentEvent?.tts_audio_url ? 'YES' : 'NONE'}
