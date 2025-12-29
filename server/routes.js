@@ -101,4 +101,11 @@ router.get('/test-polly', async (req, res) => {
     }
 });
 
+// Debug route to inspect session
+router.get('/debug/session/:sessionId', (req, res) => {
+    const session = sessionService.sessions.get(req.params.sessionId);
+    if (!session) return res.status(404).json({ error: 'Not found' });
+    res.json(session);
+});
+
 module.exports = router;
