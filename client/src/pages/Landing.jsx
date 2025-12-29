@@ -42,7 +42,8 @@ export default function Landing() {
                 language: 'es',
                 participants: apiParticipants,
                 gifts: apiGifts,
-                settings: { stylePack: 'familiar_emotivo' }
+                settings: { stylePack: 'familiar_emotivo' },
+                frontend_url: window.location.origin // Send current URL to backend so links are correct
             };
 
             const result = await createSession(payload);
@@ -100,8 +101,8 @@ export default function Landing() {
                                 type="button"
                                 onClick={() => setPack(p)}
                                 className={`p-3 rounded border capitalize ${pack === p
-                                        ? 'bg-amber-900/30 border-amber-500 text-amber-100'
-                                        : 'bg-slate-800 border-transparent text-slate-400 hover:bg-slate-800/80'
+                                    ? 'bg-amber-900/30 border-amber-500 text-amber-100'
+                                    : 'bg-slate-800 border-transparent text-slate-400 hover:bg-slate-800/80'
                                     }`}
                             >
                                 {p}

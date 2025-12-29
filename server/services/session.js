@@ -59,12 +59,13 @@ async function createSession(data) {
     // For MVP, we stick to config, but user must update config.js in Prod.
     // ALTERNATIVE: Return relative paths and let frontend resolve them? No, we need shareable links.
 
-    // Let's assume on Vercel we set process.env.FRONTEND_URL to the vercel_url
+    // Use the origin from the request if available (for Vercel/Web clients), otherwise fallback to config
+    const frontendUrl = data.frontend_url || config.FRONTEND_URL;
 
     return {
         session_id: sessionId,
-        tv_url: `${config.FRONTEND_URL}/s/${sessionId}?mode=tv`,
-        mobile_url: `${config.FRONTEND_URL}/s/${sessionId}?mode=mic`
+        tv_url: `${frontendUrl}/s/${sessionId}?mode=tv`,
+        mobile_url: `${frontendUrl}/s/${sessionId}?mode=mic`
     };
 }
 
