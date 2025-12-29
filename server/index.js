@@ -13,7 +13,12 @@ app.use(express.urlencoded({ extended: true }));
 const os = require('os');
 
 // Serve static files for audio from system temp dir (where Polly/Uploads go)
-app.use('/audio', express.static(os.tmpdir()));
+// Add CORS headers specifically for audio files to render in Vercel frontend
+app.use('/audio', (req, res, next) => {
+    res.header("Access-Control-Allow-Origin", "*");
+    res.header("Access-Control-Allow-Headers", "Origin, X-Requested-With, Content-Type, Accept");
+    next();
+}, express.static(os.tmpdir()));
 
 app.use('/api', routes);
 
