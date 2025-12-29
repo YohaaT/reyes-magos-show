@@ -20,8 +20,6 @@ const PHASES = {
 
 const KINGS = ['MELCHOR', 'GASPAR', 'BALTASAR'];
 
-// Default Scripts (Pre-loaded text for TTS)
-// In a real app, these would be in a DB or config file with variations.
 const SCRIPTS = {
     INTRO: "¡Hola! Somos los Reyes Magos. Hemos viajado desde muy lejos siguiendo la estrella.",
     RULES: "Antes de entregar los regalos, queremos hablar un poco con vosotros. ¿Estáis listos?",
@@ -43,23 +41,13 @@ async function createSession(data) {
         current_phase: PHASES.INTRO,
         current_king_index: 0,
         current_participant_index: 0,
-
         questions_used_for_person: 0,
         used_magical_long_for_person: false,
-
-        // Store last generated event to ensure idempotency if needed, or simple flow
         next_action_queue: []
     };
 
     sessions.set(sessionId, newSession);
 
-    // In production (Vercel), we want to use the actual host header if possible, or fallback manually.
-    // However, FRONTEND_URL in config might be hardcoded. 
-    // Best practice for Lambda/Vercel: construct from request headers if available in creating session.
-    // For MVP, we stick to config, but user must update config.js in Prod.
-    // ALTERNATIVE: Return relative paths and let frontend resolve them? No, we need shareable links.
-
-    // Use the origin from the request if available (for Vercel/Web clients), otherwise fallback to config
     const frontendUrl = data.frontend_url || config.FRONTEND_URL;
 
     return {
@@ -69,26 +57,23 @@ async function createSession(data) {
     };
 }
 
-const audioService = require('./audio'); // Needed for dynamic TTS in session flow
-
 async function getNextState(sessionId) {
+    // LAZY LOAD to avoid circular dependency
+    const audioService = require('./audio');
+
     const session = sessions.get(sessionId);
     if (!session) throw new Error('Session not found');
 
     let event = {};
 
-    // If we have a queued action (e.g. from an Answer), return it
     if (session.next_action_queue.length > 0) {
         event = session.next_action_queue.shift();
         return event;
     }
 
-    // Otherwise, calculate next step based on current phase
     switch (session.current_phase) {
         case PHASES.INTRO:
-            // Generate real TTS for Intro
             const introResult = await audioService.generateTTS(sessionId, 'Enrique', SCRIPTS.INTRO);
-
             event = {
                 phase: PHASES.INTRO,
                 king: KINGS[0],
@@ -99,15 +84,12 @@ async function getNextState(sessionId) {
                 should_open_question_window: false,
                 question_window_seconds: 0
             };
-            // Advance directly to Turn Start (Skipping Rules for faster MVP flow)
             session.current_phase = PHASES.TURN_START;
             break;
 
         case PHASES.TURN_START:
             const p = session.participants[session.current_participant_index];
             const king = KINGS[session.current_king_index % 3];
-
-            // Dynamic text
             const welcomeText = `¡${p.name}! La estrella nos habló de ti...`;
             const voiceId = king === 'GASPAR' ? 'Enrique' : (king === 'MELCHOR' ? 'Miguel' : 'Sergio');
 
@@ -123,7 +105,6 @@ async function getNextState(sessionId) {
                 should_open_question_window: true,
                 question_window_seconds: session.pack === 'basic' ? 12 : 15
             };
-
             session.current_phase = PHASES.QUESTION_WINDOW;
             break;
 
@@ -139,11 +120,9 @@ async function getNextState(sessionId) {
 
         case PHASES.ANSWER:
             session.current_phase = PHASES.GIFT_REVEAL;
-            return getNextState(sessionId); // Recursion
+            return getNextState(sessionId);
 
         case PHASES.GIFT_REVEAL:
-            // MVP: Skip gift reveal audio generation to save latency, or just generic
-            // For now, let's just move to closing or next person
             session.current_participant_index++;
             if (session.current_participant_index >= session.participants.length) {
                 session.current_phase = PHASES.CLOSING;
@@ -155,7 +134,6 @@ async function getNextState(sessionId) {
 
         case PHASES.CLOSING:
             const closingAudio = await audioService.generateTTS(sessionId, 'Miguel', SCRIPTS.CLOSING);
-
             event = {
                 phase: PHASES.CLOSING,
                 king: KINGS[1],
@@ -166,6 +144,16 @@ async function getNextState(sessionId) {
                 should_open_question_window: false
             };
             break;
+
+        default:
+            // Fallback for unknown phases
+            event = {
+                phase: session.current_phase,
+                king: KINGS[0],
+                subtitle_text: "...",
+                animation_cue: 'idle'
+            };
+            break;
     }
 
     return event;
@@ -174,5 +162,5 @@ async function getNextState(sessionId) {
 module.exports = {
     createSession,
     getNextState,
-    sessions // Export for other services to access
+    sessions
 };
