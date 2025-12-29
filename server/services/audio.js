@@ -77,7 +77,17 @@ async function generateReply(data) {
     console.log(`[LLM] Response: "${responseText}"`);
 
     // 2. Generate TTS immediately
-    const ttsResult = await generateTTS(session_id, 'gaspar_neural', responseText);
+    let ttsResult = await generateTTS(session_id, 'gaspar_neural', responseText);
+
+    // Safety check: specific fallback if null
+    if (!ttsResult || !ttsResult.tts_audio_url) {
+        console.error("CRITICAL: TTS returned null URL");
+        ttsResult = {
+            tts_audio_url: "https://actions.google.com/sounds/v1/speech/greeting_en.ogg",
+            duration_ms: 2000
+        };
+        responseText += " (Error de Audio)";
+    }
 
     const result = {
         spoken_text: responseText,
@@ -169,15 +179,22 @@ async function generateTTS(sessionId, voiceId, text) {
             };
         }
     } catch (error) {
-        console.error('[TTS Error]', error);
-        // Fallback to mock if AWS fails
+        console.error('[TTS Error FULL]', error);
+
+        // Return a public fallback URL that definitely works if AWS fails
+        // This helps distinguish between "No URL sent" vs "AWS Failed"
         return {
-            tts_audio_url: MOCK_AUDIO_URL,
-            duration_ms: 3000
+            tts_audio_url: "https://actions.google.com/sounds/v1/speech/greeting_en.ogg",
+            duration_ms: 3000,
+            error: error.message // Pass error up for debugging
         };
     }
 
-    return { tts_audio_url: null, duration_ms: 0 };
+    return {
+        tts_audio_url: "https://actions.google.com/sounds/v1/speech/greeting_en.ogg",
+        duration_ms: 2000,
+        error: "No stream returned"
+    };
 }
 
 module.exports = {
