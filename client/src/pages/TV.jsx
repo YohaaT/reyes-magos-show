@@ -99,8 +99,21 @@ export default function TV({ sessionId }) {
             </AnimatePresence>
 
             {/* Status Debug for MVP */}
-            <div className="absolute top-4 left-4 text-xs text-white/30">
+            <div className="absolute top-4 left-4 text-xs text-white/50 bg-black/50 p-2 rounded max-w-lg truncate">
                 Phase: {currentEvent?.phase} | King: {king}
+                <br />
+                Audio URL: {currentEvent?.tts_audio_url || 'None'}
+                <br />
+                <button
+                    onClick={() => {
+                        if (audioRef.current) {
+                            audioRef.current.play().then(() => console.log("Manual play success")).catch(e => console.error("Manual play error", e));
+                        }
+                    }}
+                    className="mt-2 bg-red-600 px-2 py-1 rounded text-white hover:bg-red-500 pointer-events-auto"
+                >
+                    FORCE PLAY SOUND
+                </button>
             </div>
         </div>
     );
