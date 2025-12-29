@@ -31,57 +31,72 @@ async function transcribe(sessionId, audioId) {
     return MOCK_TRANSCRIPTION;
 }
 
+const OpenAI = require('openai');
+const openai = new OpenAI({ apiKey: config.OPENAI_API_KEY }); // Will use process.env automatically if config maps it
+
 async function generateReply(data) {
-    console.log(`\n[🔍 TEST STEP 2: LLM] Generando respuesta para: "${data.user_input.text}"`);
-    console.log(`[ℹ️] Usando respuesta MOCK (aún no conectamos OpenAI)...`);
-
-    // data contains: session_id, user_input, etc.
-    console.log(`[LLM] Generating reply for session ${data.session_id}`);
-
-    const { session_id, user_input } = data;
-
-    // 1. Validate whitelist with LLM or regex
-    // 2. Generate response using Master Prompt
-    // 3. Update session stats (questions used)
+    const { session_id, user_input, king = 'GASPAR' } = data;
+    console.log(`\n[LLM] Generating reply for session ${session_id} | Input: "${user_input.text}"`);
 
     const session = sessionService.sessions.get(session_id);
     if (session) {
         session.questions_used_for_person += 1;
-        // Logic to enforce limits would go here
     }
 
-    // Mock LLM Response
-    const responseText = MOCK_REPLY_TEXT;
+    // 1. Construct Prompt
+    // In a full app, we would inject context about the child (name, gift, behavior) here.
+    const childName = session?.participants[session?.current_participant_index]?.name || 'el niño';
+    const gift = session?.participants[session?.current_participant_index]?.gift || 'un regalo sorpresa';
 
-    // 4. Generate TTS for the response immediately (for latency optimization)
+    // System Prompt defining the Persona
+    const systemPrompt = `Eres ${king}, uno de los Reyes Magos. 
+    Estás hablando con ${childName}. 
+    Tu tono es sabio, mágico, amable y un poco antiguo.
+    Responde a su pregunta de forma breve (máximo 2 frases).
+    El niño espera el regalo: ${gift}.
+    No rompas el personaje. Eres mágico de verdad.`;
+
+    let responseText = "";
+
+    try {
+        const completion = await openai.chat.completions.create({
+            messages: [
+                { role: "system", content: systemPrompt },
+                { role: "user", content: user_input.text }
+            ],
+            model: "gpt-3.5-turbo", // Or gpt-4-turbo for better creation
+            max_tokens: 100,
+        });
+
+        responseText = completion.choices[0].message.content;
+    } catch (error) {
+        console.error("OpenAI Error:", error);
+        responseText = "Jo, jo, jo. La magia a veces tiene interferencias, pero te escuchamos con el corazón.";
+    }
+
+    console.log(`[LLM] Response: "${responseText}"`);
+
+    // 2. Generate TTS immediately
     const ttsResult = await generateTTS(session_id, 'gaspar_neural', responseText);
 
     const result = {
         spoken_text: responseText,
         subtitle_text: responseText,
         animation_cue: 'talk_happy',
-        next_phase_suggestion: 'GIFT_REVEAL', // Or QUESTION_WINDOW if mult-turn allowed
+        next_phase_suggestion: 'GIFT_REVEAL',
         should_open_question_window: false,
         question_window_seconds: 0,
-        classified_intent: 'camels_count',
-        safety_redirect_used: false,
         tts_audio_url: ttsResult.tts_audio_url,
         duration_ms: ttsResult.duration_ms
     };
 
-    // Queue this into the session so /session/next can pick it up if the TV is polling
-    // OR the TV uses the response from /reply if the architecture was different.
-    // Based on the spec:
-    // "TV recibe evento y reproduce." -> Implicitly via polling /session/next or socket.
-    // BUT /reply output is JSON, which allows the System to know what to play.
-    // If the TV is "dumb" and just polls, we must push this to the queue.
+    // 3. Queue logic for TV
     if (session) {
         session.next_action_queue.push({
             phase: 'ANSWER',
-            king: 'GASPAR', // Should match
+            king: king,
             ...result
         });
-        // Update phase
         session.current_phase = 'ANSWER';
     }
 
