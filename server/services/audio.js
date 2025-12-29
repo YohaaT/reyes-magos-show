@@ -88,15 +88,81 @@ async function generateReply(data) {
     return result;
 }
 
-async function generateTTS(sessionId, voiceId, text) {
-    // Call AWS Polly
-    console.log(`[TTS] Generating audio for: "${text}"`);
+const fs = require('fs');
+const path = require('path');
+const os = require('os');
+const { PollyClient, SynthesizeSpeechCommand } = require('@aws-sdk/client-polly');
+const { v4: uuidv4 } = require('uuid');
 
-    // Mock result
-    return {
-        tts_audio_url: MOCK_AUDIO_URL,
-        duration_ms: 5000 // Mock duration
+// Initialize Polly Client
+// Region and credentials will be automatically picked up from process.env if set correctly
+// Env vars needed: AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_REGION
+const pollyClient = new PollyClient({ region: config.AWS_REGION });
+
+async function generateTTS(sessionId, voiceId, text) {
+    console.log(`[TTS] Generating audio for: "${text}" with voice ${voiceId || config.POLLY_VOICE_ID}`);
+
+    if (!text) return { tts_audio_url: null, duration_ms: 0 };
+
+    // Mapping custom voice IDs to Polly Voices if needed
+    // 'gaspar_neural' -> 'Sergio' (Spanish male) or 'Lupe' (Spanish female)
+    // Reyes Magos Map:
+    // Melchor: 'Miguel' (Standard) or 'Sergio' (Neural)
+    // Gaspar: 'Enrique' (Standard)
+    // Baltasar: 'Sergio' (Neural)
+    // For MVP we just use a default or what is passed if valid.
+
+    // Fallback voice
+    let pollyVoice = 'Sergio';
+    if (voiceId && ['Sergio', 'Miguel', 'Enrique', 'Lucia', 'Lupe', 'Mia'].includes(voiceId)) {
+        pollyVoice = voiceId;
+    }
+
+    const params = {
+        Text: text,
+        OutputFormat: 'mp3',
+        VoiceId: pollyVoice,
+        Engine: 'neural', // Prefer neural for quality
+        LanguageCode: 'es-ES'
     };
+
+    try {
+        const command = new SynthesizeSpeechCommand(params);
+        const response = await pollyClient.send(command);
+
+        if (response.AudioStream) {
+            const filename = `tts_${sessionId}_${uuidv4()}.mp3`;
+            const filePath = path.join(os.tmpdir(), filename);
+
+            // Write stream to file
+            const audioBuffer = await response.AudioStream.transformToByteArray();
+            fs.writeFileSync(filePath, Buffer.from(audioBuffer));
+
+            // Calculate duration roughly (or assume standard speech rate)
+            // Helper: approx 150 words per minute -> 2.5 words per second
+            const words = text.split(' ').length;
+            const durationMs = Math.max(2000, (words / 2.5) * 1000);
+
+            // Construct URL assuming /audio is mapped to os.tmpdir()
+            // In Render, config.BASE_URL is the domain.
+            const audioUrl = `${config.BASE_URL}/audio/${filename}`;
+
+            console.log(`[TTS] Generated: ${audioUrl}`);
+            return {
+                tts_audio_url: audioUrl,
+                duration_ms: durationMs
+            };
+        }
+    } catch (error) {
+        console.error('[TTS Error]', error);
+        // Fallback to mock if AWS fails
+        return {
+            tts_audio_url: MOCK_AUDIO_URL,
+            duration_ms: 3000
+        };
+    }
+
+    return { tts_audio_url: null, duration_ms: 0 };
 }
 
 module.exports = {

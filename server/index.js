@@ -10,8 +10,10 @@ app.use(cors());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// Serve static files for audio if needed (temp storage)
-app.use('/audio', express.static(path.join(__dirname, '../temp_audio')));
+const os = require('os');
+
+// Serve static files for audio from system temp dir (where Polly/Uploads go)
+app.use('/audio', express.static(os.tmpdir()));
 
 app.use('/api', routes);
 
