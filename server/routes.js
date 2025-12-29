@@ -34,12 +34,20 @@ router.post('/audio/upload', upload.single('audio_file'), async (req, res) => {
         const file = req.file;
         if (!file) throw new Error('No file uploaded');
 
-        // In a real scenario we might upload to S3 here.
-        // For now we just return the local ID/path references.
-        const audioId = file.filename;
+        // Rename file to have an extension (Whisper needs it usually, or helps debugging)
+        // We assume webm because the client records in webm/opus usually
+        const newFilename = file.filename + '.webm';
+        const fs = require('fs');
+        const path = require('path');
+        const oldPath = file.path;
+        const newPath = path.join(file.destination, newFilename);
+
+        fs.renameSync(oldPath, newPath);
+
+        console.log(`[Upload] File saved: ${newPath} (${file.size} bytes)`);
 
         // Trigger async processing or just return ID for client to trigger STT
-        res.json({ audio_id: audioId });
+        res.json({ audio_id: newFilename });
     } catch (error) {
         console.error(error);
         res.status(500).json({ error: error.message });

@@ -26,7 +26,7 @@ async function transcribe(sessionId, audioId) {
 
     if (!fs.existsSync(filePath)) {
         console.error(`[STT Error] File not found at ${filePath}`);
-        return MOCK_TRANSCRIPTION; // Fallback to mock if file missing
+        return "Error técnico: No encuentro el archivo de audio."; // Specific error, NO CAMELS
     }
 
     try {
