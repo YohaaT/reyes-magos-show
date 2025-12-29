@@ -2,7 +2,8 @@ const express = require('express');
 const router = express.Router();
 const sessionService = require('./services/session');
 const audioService = require('./services/audio'); // Orchestrator for STT/TTS/LLM
-const upload = require('multer')({ dest: 'temp_uploads/' });
+const os = require('os');
+const upload = require('multer')({ dest: os.tmpdir() });
 
 // 1) POST /session/create
 router.post('/session/create', async (req, res) => {
