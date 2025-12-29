@@ -58,16 +58,19 @@ async function createSession(data) {
     // 2. Pre-generate Audios (Parallel execution for speed)
     console.log(`[Session ${sessionId}] Pre-generating assets...`);
 
-    // A. Intro
-    const pIntro = audioService.generateTTS(sessionId, 'Enrique', SCRIPTS.INTRO);
+    // A. Intro (Use Sergio Neural for stability)
+    const pIntro = audioService.generateTTS(sessionId, 'Sergio', SCRIPTS.INTRO);
 
     // B. Closing
-    const pClosing = audioService.generateTTS(sessionId, 'Miguel', SCRIPTS.CLOSING);
+    const pClosing = audioService.generateTTS(sessionId, 'Sergio', SCRIPTS.CLOSING);
 
     // C. Turn Starts (Welcome for each child)
     const pTurns = newSession.participants.map((p, index) => {
-        const king = KINGS[index % 3]; // Round robin assignment
-        const voiceId = king === 'GASPAR' ? 'Enrique' : (king === 'MELCHOR' ? 'Miguel' : 'Sergio');
+        const king = KINGS[index % 3];
+        // Force Sergio/Lucia neural voices or similar widely available ones
+        // Gaspar -> Sergio
+        // Melchor -> Sergio (different pitch/speed if we could mod it, but same voice for now is safer)
+        const voiceId = 'Sergio';
         const text = `¡${p.name}! La estrella nos habló de ti...`;
         return audioService.generateTTS(sessionId, voiceId, text);
     });

@@ -174,7 +174,9 @@ async function generateTTS(sessionId, voiceId, text) {
             };
         }
     } catch (error) {
-        console.error('[TTS Error FULL]', error);
+        console.error(`[TTS CRITICAL FAILURE] Name: ${error.name}, Code: ${error.code}, Msg: ${error.message}`);
+        console.error(error); // Full stack trace
+
         return {
             tts_audio_url: MOCK_AUDIO_URL,
             duration_ms: 3000,
